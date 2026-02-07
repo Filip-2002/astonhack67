@@ -98,6 +98,9 @@ export default function SimulationMap({
 
   const agentMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
 
+  const selectedRouteLineRef = useRef<L.Polyline | null>(null);
+
+
   // IMPORTANT: in Skyline mode, if baseRoutes is provided, never fall back.
   const effectiveRoutes = baseRoutes !== undefined ? baseRoutes : [];
 
@@ -261,6 +264,7 @@ export default function SimulationMap({
   useEffect(() => {
     if (!routeLayerRef.current) return;
     routeLayerRef.current.clearLayers();
+    selectedRouteLineRef.current = null;
     if (!showCorridors) return;
 
     const allRoutes = [...effectiveRoutes, ...generatedRoutes];
@@ -284,14 +288,42 @@ export default function SimulationMap({
 
       const weight = isGenerated ? Math.min(9, 3 + Math.log10(1 + demandScore) * 3) : 3;
 
-      L.polyline(route.geometry as any, {
-        color: route.color,
-        weight,
-        opacity: isGenerated ? 0.85 : 0.55,
-        dashArray: isGenerated ? '8, 4' : undefined,
-      })
-        .bindTooltip(route.name, { sticky: true })
-        .addTo(routeLayerRef.current);
+      const line = L.polyline(route.geometry as any, {
+  color: route.color,
+  weight,
+  opacity: isGenerated ? 0.85 : 0.55,
+  dashArray: isGenerated ? '8, 4' : undefined,
+})
+  .bindTooltip(route.name, { sticky: true })
+  .addTo(routeLayerRef.current);
+
+// Store original style so we can restore it
+(line as any)._baseStyle = {
+  color: route.color,
+  weight,
+  opacity: isGenerated ? 0.85 : 0.55,
+  dashArray: isGenerated ? '8, 4' : undefined,
+};
+
+// CLICK → bring this route to the top
+line.on('click', (e: any) => {
+  e?.originalEvent?.stopPropagation?.();
+
+  const prev = selectedRouteLineRef.current as any;
+  if (prev && prev !== line && prev._baseStyle) {
+    prev.setStyle(prev._baseStyle);
+  }
+
+  selectedRouteLineRef.current = line;
+  line.bringToFront();
+
+  // Make selected route visually pop
+  line.setStyle({
+    weight: ((line as any)._baseStyle?.weight ?? weight) + 2,
+    opacity: 1,
+  });
+});
+
     }
   }, [showCorridors, generatedRoutes, effectiveRoutes, agents]);
 
