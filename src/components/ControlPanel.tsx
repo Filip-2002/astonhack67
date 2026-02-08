@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Play, Pause, RotateCcw, Eye, EyeOff, Zap, Route, Leaf, Users, Clock, MapPin, TrendingUp } from 'lucide-react';
 import type { SimulationState } from '@/types/simulation';
 import { BUS_ROUTES, ASTON_CENSUS } from '@/data/astonData';
@@ -64,6 +64,38 @@ export default function ControlPanel({
   } = state;
 
   const { showFlow, showCorridors, showPOIs } = state as any;
+
+  const prevGeneratedCountRef = useRef(0);
+
+useEffect(() => {
+  const prev = prevGeneratedCountRef.current;
+  const curr = generatedRoutes?.length ?? 0;
+
+  // corridors just appeared (0 -> >0)
+  if (prev === 0 && curr > 0) {
+    // make sure corridors are visible
+    if (!showCorridors) onToggleCorridors();
+
+    // auto turn off clutter layers
+    if (showPOIs) onTogglePOIs();
+    if (showFlow) onToggleFlow();
+  }
+
+  // reset when cleared
+  if (curr === 0) {
+    prevGeneratedCountRef.current = 0;
+    return;
+  }
+
+  prevGeneratedCountRef.current = curr;
+}, [generatedRoutes?.length, showPOIs, showFlow, showCorridors, onTogglePOIs, onToggleFlow, onToggleCorridors]);
+
+
+
+
+
+
+
 
   const selectedAgent = useMemo(() => {
     if (!selectedAgentId) return null;
