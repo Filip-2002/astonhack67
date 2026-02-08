@@ -177,6 +177,62 @@ boundaryRef.current = L.polygon(
     };
   }, []);
 
+useEffect(() => {
+  const boundary = boundaryRef.current;
+  if (!boundary) return;
+
+  const corridorsActive =
+    showCorridors &&
+    (effectiveRoutes.length > 0 || generatedRoutes.length > 0);
+
+  boundary.setStyle(
+    corridorsActive
+      ? { opacity: 0, fillOpacity: 0 }
+      : { opacity: 0.4, fillOpacity: 0.03 }
+  );
+}, [showCorridors, effectiveRoutes.length, generatedRoutes.length]);
+
+useEffect(() => {
+  const corridorsActive =
+    showCorridors &&
+    (effectiveRoutes.length > 0 || generatedRoutes.length > 0);
+
+  const fadeGroup = (group: L.LayerGroup | null) => {
+  if (!group) return;
+
+  group.eachLayer((layer: any) => {
+    // CircleMarker / Polyline / etc.
+    if (layer.setStyle) {
+      layer.setStyle({
+        opacity: corridorsActive ? 0 : 1,
+        fillOpacity: corridorsActive ? 0 : (layer.options?.fillOpacity ?? 1),
+      });
+    }
+
+    // Marker (icon) fallback
+    if (layer.getElement) {
+      const el = layer.getElement();
+      if (el) el.style.opacity = corridorsActive ? '0' : '1';
+    }
+  });
+};
+
+
+  fadeGroup(agentLayerRef.current);
+  fadeGroup(stopsLayerRef.current);
+}, [showCorridors, effectiveRoutes.length, generatedRoutes.length]);
+
+
+
+
+
+
+
+
+
+
+
+
   useEffect(() => {
   const boundary = boundaryRef.current;
   if (!boundary) return;
@@ -310,7 +366,6 @@ boundaryRef.current = L.polygon(
     if (!route.geometry || route.geometry.length === 0) continue;
 
     const isGenerated = generatedRoutes.some(gr => gr.id === route.id);
-
     let demandScore = 0;
     if (isGenerated && route.stopIds && route.stopIds.length > 1) {
       for (let i = 0; i < route.stopIds.length - 1; i++) {
@@ -318,14 +373,18 @@ boundaryRef.current = L.polygon(
       }
     }
 
-    const weight = isGenerated ? Math.min(9, 3 + Math.log10(1 + demandScore) * 3) : 3;
+    const weight = isGenerated ? Math.min(9, 0.5 + Math.log10(1 + demandScore) * 0.5) : 0.5;
 
-    const baseStyle = {
-      color: route.color,
-      weight,
-      opacity: isGenerated ? 0.85 : 0.55,
-      dashArray: isGenerated ? '8, 4' : undefined,
-    };
+    const baseStyle: L.PolylineOptions = {
+  color: route.color,
+  weight,
+  opacity: isGenerated ? 0.85 : 0.55,
+  dashArray: undefined,
+  lineCap: 'round',
+  lineJoin: 'round',
+  smoothFactor: 0.5, // optional (helps at some zoom levels)
+};
+
 
     const line = L.polyline(route.geometry as any, baseStyle)
       .bindTooltip(route.name, { sticky: true })
