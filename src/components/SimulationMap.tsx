@@ -97,8 +97,15 @@ export default function SimulationMap({
   const poiLayerRef = useRef<L.LayerGroup | null>(null);
 
   const agentMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
-
   const selectedRouteLineRef = useRef<L.Polyline | null>(null);
+
+  const isolatedRouteIdRef = useRef<string | null>(null);
+  const routeLinesRef = useRef<L.Polyline[]>([]);
+
+  
+  const boundaryRef = useRef<L.Polygon | null>(null);
+
+
 
 
   // IMPORTANT: in Skyline mode, if baseRoutes is provided, never fall back.
@@ -139,17 +146,21 @@ export default function SimulationMap({
     }).addTo(map);
 
     // Aston boundary
-    L.polygon(
-      (ASTON_BOUNDARY as any).map(([lat, lng]: any) => [lat, lng] as L.LatLngTuple),
-      {
-        color: 'hsl(152, 70%, 45%)',
-        weight: 1.5,
-        opacity: 0.4,
-        fillColor: 'hsl(152, 70%, 45%)',
-        fillOpacity: 0.03,
-        dashArray: '5, 5',
-      }
-    ).addTo(map);
+    // Aston boundary
+boundaryRef.current = L.polygon(
+  (ASTON_BOUNDARY as any).map(([lat, lng]: any) => [lat, lng] as L.LatLngTuple),
+  {
+    color: 'hsl(152, 70%, 45%)',
+    weight: 1.5,
+    opacity: 0.4,
+    fillColor: 'hsl(152, 70%, 45%)',
+    fillOpacity: 0.03,
+    dashArray: '5, 5',
+  }
+).addTo(map);
+
+
+
 
     agentLayerRef.current = L.layerGroup().addTo(map);
     vehicleLayerRef.current = L.layerGroup().addTo(map);
@@ -165,6 +176,22 @@ export default function SimulationMap({
       mapRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+  const boundary = boundaryRef.current;
+  if (!boundary) return;
+
+  const hasCorridors =
+    showCorridors && (effectiveRoutes.length > 0 || generatedRoutes.length > 0);
+
+  if (hasCorridors) {
+    boundary.setStyle({ opacity: 0, fillOpacity: 0 });
+  } else {
+    boundary.setStyle({ opacity: 0.4, fillOpacity: 0.03 });
+  }
+}, [showCorridors, effectiveRoutes.length, generatedRoutes.length]);
+
+
 
   // POI layer
   useEffect(() => {
@@ -260,72 +287,119 @@ export default function SimulationMap({
     }
   }, [showFlow, stopById, agents]);
 
-  // Routes layer (generated corridors)
+
+
   useEffect(() => {
-    if (!routeLayerRef.current) return;
-    routeLayerRef.current.clearLayers();
-    selectedRouteLineRef.current = null;
-    if (!showCorridors) return;
+  if (!routeLayerRef.current) return;
 
-    const allRoutes = [...effectiveRoutes, ...generatedRoutes];
-    if (allRoutes.length === 0) return;
+  routeLayerRef.current.clearLayers();
+  routeLinesRef.current = [];              // ✅ NEW: reset stored lines
+  selectedRouteLineRef.current = null;
+  isolatedRouteIdRef.current = null;
 
-    const flow = getFlowEdges();
-    const flowCountByEdge = new Map<string, number>();
-    for (const f of flow) flowCountByEdge.set(`${f.from}→${f.to}`, f.count);
+  if (!showCorridors) return;
 
-    for (const route of allRoutes) {
-      if (!route.geometry || route.geometry.length === 0) continue;
+  const allRoutes = [...effectiveRoutes, ...generatedRoutes];
+  if (allRoutes.length === 0) return;
 
-      const isGenerated = generatedRoutes.some(gr => gr.id === route.id);
+  const flow = getFlowEdges();
+  const flowCountByEdge = new Map<string, number>();
+  for (const f of flow) flowCountByEdge.set(`${f.from}→${f.to}`, f.count);
 
-      let demandScore = 0;
-      if (isGenerated && route.stopIds && route.stopIds.length > 1) {
-        for (let i = 0; i < route.stopIds.length - 1; i++) {
-          demandScore += flowCountByEdge.get(`${route.stopIds[i]}→${route.stopIds[i + 1]}`) ?? 0;
-        }
+  for (const route of allRoutes) {
+    if (!route.geometry || route.geometry.length === 0) continue;
+
+    const isGenerated = generatedRoutes.some(gr => gr.id === route.id);
+
+    let demandScore = 0;
+    if (isGenerated && route.stopIds && route.stopIds.length > 1) {
+      for (let i = 0; i < route.stopIds.length - 1; i++) {
+        demandScore += flowCountByEdge.get(`${route.stopIds[i]}→${route.stopIds[i + 1]}`) ?? 0;
       }
+    }
 
-      const weight = isGenerated ? Math.min(9, 3 + Math.log10(1 + demandScore) * 3) : 3;
+    const weight = isGenerated ? Math.min(9, 3 + Math.log10(1 + demandScore) * 3) : 3;
 
-      const line = L.polyline(route.geometry as any, {
-  color: route.color,
-  weight,
-  opacity: isGenerated ? 0.85 : 0.55,
-  dashArray: isGenerated ? '8, 4' : undefined,
-})
-  .bindTooltip(route.name, { sticky: true })
-  .addTo(routeLayerRef.current);
+    const baseStyle = {
+      color: route.color,
+      weight,
+      opacity: isGenerated ? 0.85 : 0.55,
+      dashArray: isGenerated ? '8, 4' : undefined,
+    };
 
-// Store original style so we can restore it
-(line as any)._baseStyle = {
-  color: route.color,
-  weight,
-  opacity: isGenerated ? 0.85 : 0.55,
-  dashArray: isGenerated ? '8, 4' : undefined,
-};
+    const line = L.polyline(route.geometry as any, baseStyle)
+      .bindTooltip(route.name, { sticky: true })
+      .addTo(routeLayerRef.current);
 
-// CLICK → bring this route to the top
-line.on('click', (e: any) => {
-  e?.originalEvent?.stopPropagation?.();
+    // ✅ NEW: tag + store so we can isolate/restore later
+    (line as any)._routeId = route.id;
+    (line as any)._baseStyle = baseStyle;
+    routeLinesRef.current.push(line);
 
-  const prev = selectedRouteLineRef.current as any;
-  if (prev && prev !== line && prev._baseStyle) {
-    prev.setStyle(prev._baseStyle);
-  }
+    // ✅ REPLACE: click handler with isolate toggle
+    line.on('click', (e: any) => {
+      e?.originalEvent?.stopPropagation?.();
 
+      const group = routeLayerRef.current;
+      if (!group) return;
+
+      const clickedId = (line as any)._routeId as string;
+
+      // 2nd click on same route → restore everything (but keep this route on top)
+if (isolatedRouteIdRef.current === clickedId) {
+  isolatedRouteIdRef.current = null;
+
+  // Re-add all + restore base styles
+  routeLinesRef.current.forEach((l) => {
+    if (!group.hasLayer(l)) group.addLayer(l);
+    const bs = (l as any)._baseStyle;
+    if (bs) l.setStyle(bs);
+  });
+
+  // Keep the clicked route selected + on top
   selectedRouteLineRef.current = line;
   line.bringToFront();
 
-  // Make selected route visually pop
+  // Optional: keep highlight so it’s obvious which one you were on
   line.setStyle({
-    weight: ((line as any)._baseStyle?.weight ?? weight) + 2,
+    weight: (baseStyle.weight ?? weight) + 2,
     opacity: 1,
   });
-});
 
-    }
-  }, [showCorridors, generatedRoutes, effectiveRoutes, agents]);
+  return;
+}
+
+
+      // 1st click (or click different route) → isolate this one
+      isolatedRouteIdRef.current = clickedId;
+
+      // restore previous selected style (if any)
+      const prev = selectedRouteLineRef.current as any;
+      if (prev && prev !== line && prev._baseStyle) {
+        prev.setStyle(prev._baseStyle);
+      }
+
+      // remove all other route lines from the layer group
+      routeLinesRef.current.forEach((l) => {
+        if (l !== line && group.hasLayer(l)) group.removeLayer(l);
+      });
+
+      // ensure clicked line is present + on top
+      if (!group.hasLayer(line)) group.addLayer(line);
+
+      selectedRouteLineRef.current = line;
+      line.bringToFront();
+
+      // highlight
+      line.setStyle({
+        weight: (baseStyle.weight ?? weight) + 2,
+        opacity: 1,
+      });
+    });
+  }
+}, [showCorridors, generatedRoutes, effectiveRoutes, agents]);
+
+
 
   // Agents layer
   useEffect(() => {

@@ -162,3 +162,13 @@
 .route-color-4 { color: hsl(280, 70%, 60%); }
 .route-color-5 { color: hsl(50, 90%, 55%); }
 .route-color-6 { color: hsl(320, 70%, 55%); }
+
+/* Remove Leaflet focus outline on clicked paths */
+.leaflet-interactive:focus {
+  outline: none;
+}
+
+.leaflet-interactive:focus-visible {
+  outline: none;
+}
+
